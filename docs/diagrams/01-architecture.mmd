@@ -1,0 +1,30 @@
+flowchart TB
+    app["gRPC client<br/>(application / tool)"]
+    tester["grpcurl<br/>(engineer workstation)"]
+    vip(["MetalLB VIP 172.19.255.151<br/>grpc.eg-poc2.poc.company.net"])
+
+    subgraph gwns["namespace: dvh-envoy-qa"]
+        subgraph gw["Gateway: grpc-gw (class: eg)"]
+            https["listener: https-grpc<br/>HTTPS :443, TLS terminate<br/>secret: eg-poc2-tls"]
+            h2c["listener: h2c<br/>HTTP :80, HTTP/2 cleartext"]
+        end
+    end
+
+    subgraph qa["namespace: dvh-mng-qa"]
+        route["GRPCRoute: mongo-search-grpc<br/>host: grpc.eg-poc2.poc.company.net"]
+        svc["Service: dvh-mongo-qa-search-search-svc<br/>port 27028<br/>(Envoy balances per request across pod IPs)"]
+        subgraph sts["StatefulSet: dvh-mongo-qa-search-search"]
+            m0["mongot-0<br/>:27028"]
+            m1["mongot-1<br/>:27028"]
+            m2["mongot-2<br/>:27028"]
+        end
+    end
+
+    app -->|"TLS + HTTP/2 :443"| vip
+    tester -.->|"h2c :80"| vip
+    vip --> https
+    vip -.-> h2c
+    https --> route
+    h2c -.-> route
+    route -->|"backendRefs"| svc
+    svc --> m0 & m1 & m2

@@ -1,40 +1,29 @@
 #!/usr/bin/env bash
-# Regenerate the PNG exports of the Mermaid diagrams in docs/proposal.md.
+# Render docs/diagrams/*.mmd to PNGs of the same basename.
 #
-# Confluence does not render Mermaid natively, so the published page uses these
-# PNGs instead. They are derived artifacts: rerun this script whenever a diagram
-# in proposal.md changes, or the page and the repository drift apart.
+# The prose documents embed the PNGs rather than Mermaid, because Confluence
+# renders no Mermaid at all and GitHub renders it only inline. The .mmd files
+# beside this script are therefore the source each diagram is drawn from, and
+# the PNGs are derived: rerun this after editing any .mmd.
 #
-# Requires npx (Node). mermaid-cli is fetched on demand; nothing is installed
-# globally and nothing leaves the machine.
+# Requires npx (Node). mermaid-cli is fetched on demand, installed nowhere
+# globally, and nothing leaves the machine.
 set -euo pipefail
+shopt -s nullglob
 
 cd "$(dirname "$0")/../.."
-SRC="docs/proposal.md"
-OUT="docs/diagrams"
+DIR="docs/diagrams"
 
-# Positional: the Nth ```mermaid block in SRC becomes NAMES[N-1].png.
-# Adding or reordering a diagram in SRC means editing this list.
-NAMES=(01-architecture 02-shared-service 03-request-flow 04-resource-model 05-rollout-phases)
-
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
-
-awk -v out="$work" '
-  /^```mermaid$/ {n++; inb=1; next}
-  /^```$/ && inb  {inb=0; next}
-  inb             {print > (out "/" n ".mmd")}
-' "$SRC"
-
-found=$(find "$work" -name '*.mmd' | wc -l | tr -d ' ')
-if [ "$found" -ne "${#NAMES[@]}" ]; then
-  echo "error: $SRC has $found mermaid blocks, but NAMES lists ${#NAMES[@]}." >&2
-  echo "       Update NAMES in $0 so each block keeps a stable file name." >&2
+sources=("$DIR"/*.mmd)
+if [ ${#sources[@]} -eq 0 ]; then
+  echo "error: no .mmd files in $DIR - nothing to render." >&2
   exit 1
 fi
 
-# wrappingWidth stops Mermaid breaking the hostname mid-token.
-cat > "$work/config.json" <<'CFG'
+# wrappingWidth stops Mermaid breaking the long hostname mid-token.
+config="$(mktemp)"
+trap 'rm -f "$config"' EXIT
+cat > "$config" <<'CFG'
 {
   "theme": "default",
   "flowchart": { "wrappingWidth": 420, "htmlLabels": true, "curve": "basis" },
@@ -42,12 +31,27 @@ cat > "$work/config.json" <<'CFG'
 }
 CFG
 
-for i in "${!NAMES[@]}"; do
-  n=$((i + 1))
-  npx -y -p @mermaid-js/mermaid-cli mmdc \
-    -i "$work/$n.mmd" -o "$OUT/${NAMES[$i]}.png" \
-    -c "$work/config.json" -b white -s 3 >/dev/null
-  printf '  %-24s %s\n' "${NAMES[$i]}.png" "$(file -b "$OUT/${NAMES[$i]}.png" | cut -d, -f2)"
+for src in "${sources[@]}"; do
+  out="${src%.mmd}.png"
+  npx -y -p @mermaid-js/mermaid-cli mmdc -i "$src" -o "$out" -c "$config" -b white -s 3 >/dev/null
+  printf '  %-26s %s\n' "$(basename "$out")" "$(file -b "$out" | cut -d, -f2)"
 done
 
-echo "Rendered ${#NAMES[@]} diagrams into $OUT/"
+# Every image the documents reference must exist, or a page renders a broken
+# image and nobody notices until it is published.
+missing=0
+for doc in README.md docs/proposal.md; do
+  while IFS= read -r png; do
+    case "$doc" in
+      README.md) path="$png" ;;
+      *)         path="docs/$png" ;;
+    esac
+    if [ ! -f "$path" ]; then
+      echo "error: $doc references $png, which does not exist." >&2
+      missing=1
+    fi
+  done < <(grep -o '^!\[[^]]*\](\([^)]*\))' "$doc" | sed 's/.*(\(.*\))/\1/')
+done
+[ "$missing" -eq 0 ] || exit 1
+
+echo "Rendered ${#sources[@]} diagrams; all referenced images present."

@@ -39,40 +39,9 @@ This README is the reference implementation. The design proposal (goals, decisio
 
 Solid lines are the production path (TLS, port 443). Dotted lines are the test path (h2c, port 80).
 
-```mermaid
-flowchart TB
-    app["gRPC client<br/>(application / tool)"]
-    tester["grpcurl<br/>(engineer workstation)"]
-    vip(["MetalLB VIP 172.19.255.151<br/>grpc.eg-poc2.poc.company.net"])
+![Architecture](docs/diagrams/01-architecture.png)
 
-    subgraph gwns["namespace: dvh-envoy-qa"]
-        subgraph gw["Gateway: grpc-gw (class: eg)"]
-            https["listener: https-grpc<br/>HTTPS :443, TLS terminate<br/>secret: eg-poc2-tls"]
-            h2c["listener: h2c<br/>HTTP :80, HTTP/2 cleartext"]
-        end
-    end
-
-    subgraph qa["namespace: dvh-mng-qa"]
-        route["GRPCRoute: mongo-search-grpc<br/>host: grpc.eg-poc2.poc.company.net"]
-        svc["Service: dvh-mongo-qa-search-search-svc<br/>port 27028<br/>(Envoy balances per request across pod IPs)"]
-        subgraph sts["StatefulSet: dvh-mongo-qa-search-search"]
-            m0["mongot-0<br/>:27028"]
-            m1["mongot-1<br/>:27028"]
-            m2["mongot-2<br/>:27028"]
-        end
-    end
-
-    app -->|"TLS + HTTP/2 :443"| vip
-    tester -.->|"h2c :80"| vip
-    vip --> https
-    vip -.-> h2c
-    https --> route
-    h2c -.-> route
-    route -->|"backendRefs"| svc
-    svc --> m0 & m1 & m2
-```
-
-ASCII version, for terminals, wikis and anywhere Mermaid does not render:
+ASCII version, for terminals, wikis and anywhere the image does not render:
 
 ```text
      PRODUCTION PATH (TLS)                 TEST PATH (h2c)
@@ -139,20 +108,7 @@ ASCII version, for terminals, wikis and anywhere Mermaid does not render:
 
 A common first attempt is to point the route at the per-pod Service `dvh-mongo-qa-search-search-0-proxy-svc`. That Service selects a single pod, so the gateway inherits a single point of failure, gets no load balancing, and cannot scale out. Point the route at `dvh-mongo-qa-search-search-svc` instead, which selects all StatefulSet replicas.
 
-```mermaid
-flowchart TB
-    subgraph avoid["Avoid: per-pod proxy Service"]
-        direction LR
-        g1["Gateway"] --> p0["search-0-proxy-svc"] --> a0["mongot-0"]
-    end
-    subgraph use["Recommended: shared Service"]
-        direction LR
-        g2["Gateway"] --> s["search-svc"]
-        s --> b0["mongot-0"]
-        s --> b1["mongot-1"]
-        s --> b2["mongot-2"]
-    end
-```
+![Route to the shared Service, not a per-pod Service](docs/diagrams/02-shared-service.png)
 
 ```text
 AVOID: route to a per-pod proxy Service
@@ -185,27 +141,7 @@ Envoy Gateway does not send traffic through the Service's ClusterIP. It watches 
 
 ## Request flow
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as gRPC client
-    participant E as Envoy (VIP 172.19.255.151)
-    participant M as mongot-N
-
-    C->>E: Connect to grpc.eg-poc2.poc.company.net
-    alt Production, port 443
-        C->>E: TLS ClientHello, SNI grpc.eg-poc2.poc.company.net
-        E-->>C: Certificate from secret dvh-envoy-qa/eg-poc2-tls
-    else Testing, port 80
-        Note over C,E: h2c, no TLS handshake
-    end
-    C->>E: HTTP/2 gRPC call, authority grpc.eg-poc2.poc.company.net
-    Note over E: Match listener, then GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc by hostname
-    Note over E: Pick a ready pod from the EndpointSlices<br/>of dvh-mongo-qa-search-search-svc
-    E->>M: HTTP/2 to podIP:27028
-    M-->>E: gRPC response
-    E-->>C: gRPC response and status
-```
+![Request flow](docs/diagrams/03-request-flow.png)
 
 ```text
 [1] Client resolves grpc.eg-poc2.poc.company.net -> 172.19.255.151
@@ -238,26 +174,7 @@ sequenceDiagram
 
 Arrows point from the object that holds a reference to the object it references.
 
-```mermaid
-flowchart LR
-    gc["GatewayClass<br/>eg"]
-    ep["EnvoyProxy<br/>dvh-envoy-qa/grpc-gw-proxy"]
-    sec["Secret<br/>dvh-envoy-qa/eg-poc2-tls"]
-    gw["Gateway<br/>dvh-envoy-qa/grpc-gw"]
-    rt["GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc"]
-    svc["Service<br/>dvh-mng-qa/dvh-mongo-qa-search-search-svc"]
-    sts["StatefulSet<br/>dvh-mng-qa/dvh-mongo-qa-search-search"]
-    op["MongoDB Operator"]
-
-    gw -->|"gatewayClassName"| gc
-    gw -->|"infrastructure.parametersRef"| ep
-    gw -->|"tls.certificateRefs"| sec
-    rt -->|"parentRefs: h2c, https-grpc"| gw
-    rt -->|"backendRefs: port 27028"| svc
-    svc -->|"selects pods of"| sts
-    op -.->|"creates and manages"| svc
-    op -.->|"creates and manages"| sts
-```
+![Resource model](docs/diagrams/04-resource-model.png)
 
 ## Repository layout
 
@@ -269,7 +186,7 @@ flowchart LR
 |   |-- proposal.md           Self-contained design proposal (the source of truth)
 |   |-- confluence.md         Generated: proposal.md with image placeholders, for Confluence
 |   |-- build-confluence.sh   Regenerates confluence.md from proposal.md
-|   `-- diagrams/             PNG exports of the Mermaid diagrams, plus render.sh
+|   `-- diagrams/             Mermaid sources (.mmd), rendered PNGs, and render.sh
 `-- manifests/
     |-- 00-namespace.yaml     Namespace: dvh-envoy-qa (Gateway side)
     |-- 01-envoyproxy.yaml    EnvoyProxy: LoadBalancer Service + MetalLB VIP

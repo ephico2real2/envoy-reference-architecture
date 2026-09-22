@@ -1,0 +1,12 @@
+flowchart TB
+    subgraph avoid["Avoid: per-pod proxy Service"]
+        direction LR
+        g1["Gateway"] --> p0["search-0-proxy-svc"] --> a0["mongot-0"]
+    end
+    subgraph use["Recommended: shared Service"]
+        direction LR
+        g2["Gateway"] --> s["search-svc"]
+        s --> b0["mongot-0"]
+        s --> b1["mongot-1"]
+        s --> b2["mongot-2"]
+    end

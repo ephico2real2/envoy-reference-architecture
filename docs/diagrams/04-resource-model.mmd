@@ -1,0 +1,18 @@
+flowchart LR
+    gc["GatewayClass<br/>eg"]
+    ep["EnvoyProxy<br/>dvh-envoy-qa/grpc-gw-proxy"]
+    sec["Secret<br/>dvh-envoy-qa/eg-poc2-tls"]
+    gw["Gateway<br/>dvh-envoy-qa/grpc-gw"]
+    rt["GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc"]
+    svc["Service<br/>dvh-mng-qa/dvh-mongo-qa-search-search-svc"]
+    sts["StatefulSet<br/>dvh-mng-qa/dvh-mongo-qa-search-search"]
+    op["MongoDB Operator"]
+
+    gw -->|"gatewayClassName"| gc
+    gw -->|"infrastructure.parametersRef"| ep
+    gw -->|"tls.certificateRefs"| sec
+    rt -->|"parentRefs: h2c, https-grpc"| gw
+    rt -->|"backendRefs: port 27028"| svc
+    svc -->|"selects pods of"| sts
+    op -.->|"creates and manages"| svc
+    op -.->|"creates and manages"| sts

@@ -12,8 +12,9 @@
 > **Publishing this page.** Diagrams are not inline. Each one is marked by a bold
 > placeholder naming the PNG that belongs there. Attach all five images from
 > `docs/diagrams/` to the page, then replace each placeholder with its image;
-> `docs/diagrams/README.md` repeats the mapping. This file is generated from
-> `proposal.md` by `docs/build-confluence.sh`, so edit that and regenerate.
+> `docs/diagrams/README.md` repeats the mapping. The plain-text copies of the
+> diagrams are omitted here because the attached image replaces them. Generated
+> from `proposal.md` by `docs/build-confluence.sh`, so edit that and regenerate.
 
 ## 1. Summary
 

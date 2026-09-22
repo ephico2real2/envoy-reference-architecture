@@ -9,11 +9,11 @@
 | Created | 2026-09-22 |
 | Reference implementation | This repository. Every manifest is reproduced in full in Appendix A, so this page stands alone. |
 
-> **Diagrams.** Each diagram is a Mermaid block, which GitHub renders inline. Confluence
-> renders neither Mermaid nor these file paths, so publish `confluence.md` instead: the same
-> content with a bold placeholder where each diagram goes, and the matching PNG in
-> `docs/diagrams/`. After changing a diagram regenerate both with `docs/build-confluence.sh`
-> and `docs/diagrams/render.sh`.
+> **Diagrams.** Each diagram is a PNG embedded by repository path, with a plain-text
+> copy beside it. Confluence resolves neither, so publish `confluence.md` instead: the
+> same content with a bold placeholder naming the image to attach. The Mermaid sources
+> are `docs/diagrams/*.mmd`; after editing one, regenerate with `docs/diagrams/render.sh`
+> and `docs/build-confluence.sh`.
 
 ## 1. Summary
 
@@ -86,37 +86,66 @@ One Gateway serves two paths to the same backend:
 
 Solid lines are the production path (TLS, port 443). Dotted lines are the test path (h2c, port 80).
 
-```mermaid
-flowchart TB
-    app["gRPC client<br/>(application / tool)"]
-    tester["grpcurl<br/>(engineer workstation)"]
-    vip(["MetalLB VIP 172.19.255.151<br/>grpc.eg-poc2.poc.company.net"])
+![Architecture](diagrams/01-architecture.png)
 
-    subgraph gwns["namespace: dvh-envoy-qa"]
-        subgraph gw["Gateway: grpc-gw (class: eg)"]
-            https["listener: https-grpc<br/>HTTPS :443, TLS terminate<br/>secret: eg-poc2-tls"]
-            h2c["listener: h2c<br/>HTTP :80, HTTP/2 cleartext"]
-        end
-    end
-
-    subgraph qa["namespace: dvh-mng-qa"]
-        route["GRPCRoute: mongo-search-grpc<br/>host: grpc.eg-poc2.poc.company.net"]
-        svc["Service: dvh-mongo-qa-search-search-svc<br/>port 27028<br/>(Envoy balances per request across pod IPs)"]
-        subgraph sts["StatefulSet: dvh-mongo-qa-search-search"]
-            m0["mongot-0<br/>:27028"]
-            m1["mongot-1<br/>:27028"]
-            m2["mongot-2<br/>:27028"]
-        end
-    end
-
-    app -->|"TLS + HTTP/2 :443"| vip
-    tester -.->|"h2c :80"| vip
-    vip --> https
-    vip -.-> h2c
-    https --> route
-    h2c -.-> route
-    route -->|"backendRefs"| svc
-    svc --> m0 & m1 & m2
+```text
+     PRODUCTION PATH (TLS)                 TEST PATH (h2c)
+     +-------------------------+           +-------------------------+
+     | gRPC client             |           | grpcurl                 |
+     | (application / tool)    |           | (engineer workstation)  |
+     +------------+------------+           +------------+------------+
+                  |                                     |
+                  | TLS + HTTP/2                        | h2c cleartext
+                  | :443                                | :80
+                  v                                     v
+  +---------------------------------------------------------------------+
+  | MetalLB VIP 172.19.255.151  <-  DNS: grpc.eg-poc2.poc.company.net   |
+  | Envoy proxy Service type=LoadBalancer (EnvoyProxy: grpc-gw-proxy)   |
+  | Envoy pods run in envoy-gateway-system by default                   |
+  +---------------+-------------------------------------+---------------+
+                  |                                     |
+  +---------------+-------------------------------------+---------------+
+  |               |       namespace: dvh-envoy-qa       |               |
+  |               |    Gateway: grpc-gw (class: eg)     |               |
+  |               v                                     v               |
+  |  +-------------------------+           +-------------------------+  |
+  |  | listener: https-grpc    |           | listener: h2c           |  |
+  |  | HTTPS :443              |           | HTTP :80                |  |
+  |  | tls: Terminate          |           | HTTP/2 cleartext        |  |
+  |  | secret: eg-poc2-tls     |           |                         |  |
+  |  +------------+------------+           +------------+------------+  |
+  |               |                                     |               |
+  +---------------+-------------------------------------+---------------+
+                  |                                     |
+                  +------------------+------------------+
+                                     | parentRefs -> both listeners
+                                     |
+  +----------------------------------+----------------------------------+
+  | namespace: dvh-mng-qa            v                                  |
+  |            +-------------------------------------------+            |
+  |            | GRPCRoute: mongo-search-grpc              |            |
+  |            | hostnames: grpc.eg-poc2.poc.company.net   |            |
+  |            | listeners: h2c, https-grpc                |            |
+  |            +---------------------+---------------------+            |
+  |                                  | backendRefs                      |
+  |                                  v                                  |
+  |            +-------------------------------------------+            |
+  |            | Service: dvh-mongo-qa-search-search-svc   |            |
+  |            | port: 27028                               |            |
+  |            +---------------------+---------------------+            |
+  |                                  | EndpointSlice: ready pod IPs     |
+  |                                  | Envoy balances per request       |
+  |              +-------------------+-------------------+              |
+  |              |                   |                   |              |
+  |              v                   v                   v              |
+  |       +-------------+     +-------------+     +-------------+       |
+  |       | mongot-0    |     | mongot-1    |     | mongot-2    |       |
+  |       | :27028      |     | :27028      |     | :27028      |       |
+  |       +-------------+     +-------------+     +-------------+       |
+  | StatefulSet: dvh-mongo-qa-search-search (replicas: 3)               |
+  | pods: dvh-mongo-qa-search-search-0 / -1 / -2                        |
+  | Service + StatefulSet are created by the MongoDB Operator           |
+  +---------------------------------------------------------------------+
 ```
 
 
@@ -124,19 +153,31 @@ flowchart TB
 
 A common first attempt is to point the route at the per-pod Service `dvh-mongo-qa-search-search-0-proxy-svc`. That Service selects a single pod, so the gateway inherits a single point of failure, gets no load balancing, and cannot scale out. The route targets `dvh-mongo-qa-search-search-svc` instead, which selects all StatefulSet replicas.
 
-```mermaid
-flowchart TB
-    subgraph avoid["Avoid: per-pod proxy Service"]
-        direction LR
-        g1["Gateway"] --> p0["search-0-proxy-svc"] --> a0["mongot-0"]
-    end
-    subgraph use["Recommended: shared Service"]
-        direction LR
-        g2["Gateway"] --> s["search-svc"]
-        s --> b0["mongot-0"]
-        s --> b1["mongot-1"]
-        s --> b2["mongot-2"]
-    end
+![Route to the shared Service, not a per-pod Service](diagrams/02-shared-service.png)
+
+```text
+AVOID: route to a per-pod proxy Service
+
+  +---------+     +--------------------+     +----------+
+  | Gateway |---->| search-0-proxy-svc |---->| mongot-0 |
+  +---------+     +--------------------+     +----------+
+
+  Single point of failure, no load balancing, no scale-out.
+
+
+RECOMMENDED: route to the shared Service
+
+                                           +----------+
+                                      +--->| mongot-0 |
+                                      |    +----------+
+  +---------+     +------------+      |    +----------+
+  | Gateway |---->| search-svc |------+--->| mongot-1 |
+  +---------+     +------------+      |    +----------+
+                                      |    +----------+
+                                      +--->| mongot-2 |
+                                           +----------+
+
+  Load balancing, HA, automatic failover, scale-out with no gateway change.
 ```
 
 
@@ -146,26 +187,33 @@ Envoy Gateway does not send traffic through the Service's ClusterIP. It watches 
 
 ### 4.5 Request flow
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as gRPC client
-    participant E as Envoy (VIP 172.19.255.151)
-    participant M as mongot-N
+![Request flow](diagrams/03-request-flow.png)
 
-    C->>E: Connect to grpc.eg-poc2.poc.company.net
-    alt Production, port 443
-        C->>E: TLS ClientHello, SNI grpc.eg-poc2.poc.company.net
-        E-->>C: Certificate from secret dvh-envoy-qa/eg-poc2-tls
-    else Testing, port 80
-        Note over C,E: h2c, no TLS handshake
-    end
-    C->>E: HTTP/2 gRPC call, authority grpc.eg-poc2.poc.company.net
-    Note over E: Match listener, then GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc by hostname
-    Note over E: Pick a ready pod from the EndpointSlices<br/>of dvh-mongo-qa-search-search-svc
-    E->>M: HTTP/2 to podIP:27028
-    M-->>E: gRPC response
-    E-->>C: gRPC response and status
+```text
+[1] Client resolves grpc.eg-poc2.poc.company.net -> 172.19.255.151
+     |
+     v
+[2] MetalLB VIP hands the connection to an Envoy proxy pod
+     |
+     v
+[3] Envoy listener accepts the connection
+       :443  https-grpc   TLS terminated with dvh-envoy-qa/eg-poc2-tls (SNI must match)
+       :80   h2c          HTTP/2 cleartext, no TLS
+     |
+     v
+[4] Envoy matches GRPCRoute dvh-mng-qa/mongo-search-grpc
+       :authority must equal grpc.eg-poc2.poc.company.net
+       the rule has no method matches -> all gRPC services/methods
+     |
+     v
+[5] Envoy picks a ready pod from the EndpointSlices of
+    dvh-mongo-qa-search-search-svc (per-request load balancing)
+     |
+     v
+[6] mongot-N serves the call on podIP:27028
+     |
+     v
+[7] Response returns to the client on the same HTTP/2 stream
 ```
 
 
@@ -173,25 +221,32 @@ sequenceDiagram
 
 Arrows point from the object that holds a reference to the object it references.
 
-```mermaid
-flowchart LR
-    gc["GatewayClass<br/>eg"]
-    ep["EnvoyProxy<br/>dvh-envoy-qa/grpc-gw-proxy"]
-    sec["Secret<br/>dvh-envoy-qa/eg-poc2-tls"]
-    gw["Gateway<br/>dvh-envoy-qa/grpc-gw"]
-    rt["GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc"]
-    svc["Service<br/>dvh-mng-qa/dvh-mongo-qa-search-search-svc"]
-    sts["StatefulSet<br/>dvh-mng-qa/dvh-mongo-qa-search-search"]
-    op["MongoDB Operator"]
+![Resource model](diagrams/04-resource-model.png)
 
-    gw -->|"gatewayClassName"| gc
-    gw -->|"infrastructure.parametersRef"| ep
-    gw -->|"tls.certificateRefs"| sec
-    rt -->|"parentRefs: h2c, https-grpc"| gw
-    rt -->|"backendRefs: port 27028"| svc
-    svc -->|"selects pods of"| sts
-    op -.->|"creates and manages"| svc
-    op -.->|"creates and manages"| sts
+```text
+  GatewayClass: eg <----------------+ gatewayClassName
+                                    |
+  EnvoyProxy: dvh-envoy-qa/  <------+ infrastructure.parametersRef
+    grpc-gw-proxy                   |
+                                    |
+  Secret: dvh-envoy-qa/      <------+ tls.certificateRefs
+    eg-poc2-tls                     |
+                                    |
+                          Gateway: dvh-envoy-qa/grpc-gw
+                                    ^
+                                    | parentRefs (sectionName: h2c, https-grpc)
+                                    |
+                          GRPCRoute: dvh-mng-qa/mongo-search-grpc
+                                    |
+                                    | backendRefs (port 27028)
+                                    v
+                          Service: dvh-mng-qa/dvh-mongo-qa-search-search-svc
+                                    |
+                                    | selects pods of
+                                    v
+                          StatefulSet: dvh-mng-qa/dvh-mongo-qa-search-search
+
+  MongoDB Operator creates and manages the Service and the StatefulSet.
 ```
 
 
@@ -363,9 +418,12 @@ kubectl logs -n envoy-gateway-system \
 
 ## 9. Rollout plan
 
-```mermaid
-flowchart LR
-    p0["Phase 0<br/>Prerequisites"] --> p1["Phase 1<br/>Deploy + h2c validation"] --> p2["Phase 2<br/>TLS path"] --> p3["Phase 3<br/>Pilot clients"] --> p4["Phase 4<br/>Harden, close h2c"] --> p5["Phase 5<br/>Promote pattern"]
+![Rollout phases](diagrams/05-rollout-phases.png)
+
+```text
+  Phase 0        Phase 1              Phase 2      Phase 3    Phase 4          Phase 5
+  Prerequisites -> Deploy + h2c ------> TLS path -> Pilot ---> Harden, ------> Promote
+                   validation                       clients    close h2c       pattern
 ```
 
 

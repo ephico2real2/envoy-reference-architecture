@@ -1,0 +1,10 @@
+# TLS material must never be committed
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+
+# OS / editor noise
+.DS_Store
+*.swp

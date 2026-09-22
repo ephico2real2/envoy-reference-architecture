@@ -1,0 +1,43 @@
+# Gateway: one VIP, two listeners.
+#   h2c        :80   HTTP/2 cleartext, for testing and troubleshooting
+#   https-grpc :443  TLS terminated at Envoy, for production
+# The TLS secret eg-poc2-tls must exist in namespace dvh-envoy-qa (it is not kept in git).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: grpc-gw
+  namespace: dvh-envoy-qa
+spec:
+  gatewayClassName: eg
+
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: grpc-gw-proxy
+
+  addresses:
+    - type: IPAddress
+      value: "172.19.255.151"
+
+  listeners:
+    - name: h2c
+      protocol: HTTP
+      port: 80
+      hostname: grpc.eg-poc2.poc.local
+      allowedRoutes:
+        namespaces:
+          from: All
+
+    - name: https-grpc
+      protocol: HTTPS
+      port: 443
+      hostname: grpc.eg-poc2.poc.local
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: eg-poc2-tls
+      allowedRoutes:
+        namespaces:
+          from: All

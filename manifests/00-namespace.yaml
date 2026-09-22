@@ -1,0 +1,6 @@
+# Namespace for the Gateway, its EnvoyProxy and the TLS secret.
+# The GRPCRoute and the mongot backend stay in dvh-mng-qa.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dvh-envoy-qa

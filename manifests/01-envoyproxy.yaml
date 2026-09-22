@@ -1,0 +1,18 @@
+# EnvoyProxy: parameters for the Envoy data plane that serves Gateway dvh-envoy-qa/grpc-gw.
+# Exposes Envoy as a LoadBalancer Service and pins the MetalLB VIP.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: grpc-gw-proxy
+  namespace: dvh-envoy-qa
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        # Must match the class MetalLB was started with (--lb-class).
+        # If MetalLB runs without a class, remove this line.
+        loadBalancerClass: metallb.io/metallb
+        annotations:
+          metallb.io/loadBalancerIPs: "172.19.255.151"

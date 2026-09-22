@@ -319,7 +319,7 @@ kubectl logs -n envoy-gateway-system \
 | `mongot` sheds load with `RESOURCE_EXHAUSTED` and no retry is configured | Failed queries under load that the operator-managed proxy would have retried | Set retries in a `BackendTrafficPolicy`; the managed Envoy default is 2 retries with a 60s per-try timeout |
 | `MongoDBSearch` left on `loadBalancer.managed`, or with no `loadBalancer` at all | A second Envoy deployed beside this Gateway, or the resource rejected at 3 replicas | Appendix A.7; verify the written `mongotHost` after applying |
 | MetalLB `loadBalancerClass` mismatch or VIP conflict | No external address | Check the MetalLB class and pool in Phase 0 |
-| MetalLB node change: L2 failover, or a BGP rehash when the node set changes | Established HTTP/2 connections break, so `mongod` loses its long-lived connection to `mongot` and search fails until it redials | Expected behaviour rather than a defect. Plan for it: more than one Envoy replica, client retry behaviour, and resilient ECMP on the routers in BGP mode |
+| MetalLB L2 failover moves the VIP to another node | Established HTTP/2 connections break, so `mongod` loses its long-lived connection to `mongot` and search fails until it redials | Expected behaviour rather than a defect. Plan for it with more than one Envoy replica and with client retry behaviour; clients caching the old MAC lengthen the outage |
 | Cleartext test path left open | Unencrypted access to search | Phase 4 gate; acceptance criterion |
 | Single Envoy replica | Gateway outage | 2+ replicas in the EnvoyProxy, spread across nodes |
 | Long-running queries hit default timeouts | Failed queries | Tune timeouts in a `BackendTrafficPolicy` |
@@ -384,14 +384,11 @@ spec:
           metallb.io/loadBalancerIPs: "172.19.255.151"
 ```
 
-**MetalLB and gRPC.** MetalLB advertises the VIP on the network and hands the connection to a node. It is an L2/BGP address advertiser, not an L7 proxy, and has no notion of HTTP/2 or gRPC, so there is nothing to enable for gRPC here: stream balancing, retries and TLS are all Envoy's job. What MetalLB does decide is what happens to established connections when the cluster changes, and gRPC connections are long-lived by design.
+**MetalLB and gRPC.** MetalLB advertises the VIP on the network and hands the connection to a node. It is an L2 address advertiser, not an L7 proxy, and has no notion of HTTP/2 or gRPC, so there is nothing to enable for gRPC here: stream balancing, retries and TLS are all Envoy's job. What MetalLB does decide is what happens to established connections when the cluster changes, and gRPC connections are long-lived by design.
 
-| Mode | Behaviour | Effect on gRPC |
-|---|---|---|
-| L2 (ARP/NDP) | One elected node answers for the VIP; kube-proxy spreads from there | Every stream enters through a single node, so that node's bandwidth is the ceiling. On failover MetalLB sends gratuitous ARP/NDP, and clients that cache the old MAC reconnect slowly |
-| BGP (ECMP) | Routers hash each connection across nodes | Router hashes are not stable. When the node set changes, most established connections rehash onto a node that knows nothing about them and break in one clean hit. "Resilient ECMP", where the routers offer it, reduces this sharply |
+In L2 mode one elected node answers ARP/NDP for the VIP, and kube-proxy spreads from there. Two consequences are worth planning for. Every stream enters through that single node, so its bandwidth is the ceiling for the whole gateway. And when that node goes away MetalLB moves the VIP by sending gratuitous ARP/NDP, so clients that cache the old MAC keep addressing a node that no longer answers until their cache expires.
 
-Either way a node change ends established HTTP/2 connections and every client has to reconnect. That matters more here than in a typical HTTP setup: `mongod` holds a single long-lived connection to `mongot` through this gateway, so a MetalLB event is a search outage until it redials.
+A node change therefore ends established HTTP/2 connections and every client has to reconnect. That matters more here than in a typical HTTP setup: `mongod` holds a single long-lived connection to `mongot` through this gateway, so a MetalLB failover is a search outage until it redials.
 
 `externalTrafficPolicy` is worth choosing deliberately, since MetalLB honours it. `Cluster`, the default, spreads traffic across nodes but SNATs it, so the client IP does not reach the Envoy access log. `Local` preserves the source IP and skips a hop, but only nodes running an Envoy pod will accept the traffic, which makes Envoy replica placement part of the routing decision.
 

@@ -78,6 +78,7 @@ One Gateway serves two paths to the same backend:
 - Envoy Gateway installed (GatewayClass `eg`).
 - MetalLB installed, with an address pool that contains `172.19.255.151`.
 - MongoDB Search deployed by the MongoDB Operator, with 3 `mongot` replicas.
+- Write access to the `MongoDBSearch` resource, to set `loadBalancer.unmanaged` (Appendix A.7).
 - `grpc.eg-poc2.poc.company.net` resolves to `172.19.255.151` (DNS or `/etc/hosts`) — see Appendix A.5.
 - An internal CA, or cert-manager on the cluster, to issue the gateway certificate — see Appendix A.6.
 - `grpcurl` installed on the test workstation.
@@ -271,6 +272,7 @@ Arrows point from the object that holds a reference to the object it references.
 | D4 | Test path | h2c listener on port 80, temporary | Validates routing and endpoints without TLS in the way. Removed, or moved to an internal-only Gateway, before production. |
 | D5 | Namespace layout | Gateway in `dvh-envoy-qa`, route in `dvh-mng-qa` | Follows the Gateway API role model. Route and Service share a namespace, so no ReferenceGrant is needed. |
 | D6 | Dedicated Gateway and VIP | Separate `grpc-gw` rather than sharing an HTTP gateway | Limits blast radius and lets gRPC settings (timeouts, TLS, policies) evolve independently. |
+| D7 | Who runs the L7 balancer | `MongoDBSearch` `loadBalancer.unmanaged`, pointed at this Gateway | The `managed` mode would have the operator deploy a second Envoy. `unmanaged` makes this Gateway the single L7 hop, at the cost of owning the retry policy the managed proxy configures by default. Multi-cluster is not supported in this mode. |
 
 ## 6. Alternatives considered
 
@@ -304,6 +306,10 @@ kubectl create secret tls eg-poc2-tls -n dvh-envoy-qa --cert=tls.crt --key=tls.k
 
 # 3. Gateway resources (applied in file-name order)
 kubectl apply -f manifests/
+
+# 4. Point MongoDBSearch at this gateway (Appendix A.7). Edit the existing
+#    resource; it is not in this repository because the operator owns it.
+kubectl edit mongodbsearch -n dvh-mng-qa
 ```
 
 ### 8.2 Validate
@@ -452,8 +458,11 @@ kubectl logs -n envoy-gateway-system \
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| mongot behaviour when calls for one query land on different replicas (for example how search cursors are continued) | Failed or inconsistent queries | Confirm with MongoDB documentation for our operator and mongot version during Phase 1; if needed, use consistent-hash load balancing in a `BackendTrafficPolicy` |
+| Query cursors spread across replicas | Failed or inconsistent queries | MongoDB documents that an L7 balancer pins each gRPC stream to one `mongot` for the lifetime of the cursor; confirm for our operator and mongot version in Phase 1 |
+| `mongot` sheds load with `RESOURCE_EXHAUSTED` and no retry is configured | Failed queries under load that the operator-managed proxy would have retried | Set retries in a `BackendTrafficPolicy`; the managed Envoy default is 2 retries with a 60s per-try timeout |
+| `MongoDBSearch` left on `loadBalancer.managed`, or with no `loadBalancer` at all | A second Envoy deployed beside this Gateway, or the resource rejected at 3 replicas | Appendix A.7; verify the written `mongotHost` after applying |
 | MetalLB `loadBalancerClass` mismatch or VIP conflict | No external address | Check the MetalLB class and pool in Phase 0 |
+| MetalLB node change: L2 failover, or a BGP rehash when the node set changes | Established HTTP/2 connections break, so `mongod` loses its long-lived connection to `mongot` and search fails until it redials | Expected behaviour rather than a defect. Plan for it: more than one Envoy replica, client retry behaviour, and resilient ECMP on the routers in BGP mode |
 | Cleartext test path left open | Unencrypted access to search | Phase 4 gate; acceptance criterion |
 | Single Envoy replica | Gateway outage | 2+ replicas in the EnvoyProxy, spread across nodes |
 | Long-running queries hit default timeouts | Failed queries | Tune timeouts in a `BackendTrafficPolicy` |
@@ -465,7 +474,7 @@ kubectl logs -n envoy-gateway-system \
 2. Does security policy require TLS on the gateway-to-mongot hop?
 3. Is client authentication (mTLS or other) required at the gateway?
 4. What are the production hostname and certificate issuer?
-5. Does our mongot version support per-request load balancing across replicas for our query patterns?
+5. Does our operator version accept `loadBalancer.unmanaged`, and does `mongot` behave as documented (each gRPC stream pinned to one replica for the lifetime of the cursor) for our query patterns?
 6. Which team owns the `dvh-envoy-qa` Gateway day to day?
 
 ## 13. Decision and approvals
@@ -517,6 +526,19 @@ spec:
         annotations:
           metallb.io/loadBalancerIPs: "172.19.255.151"
 ```
+
+**MetalLB and gRPC.** MetalLB advertises the VIP on the network and hands the connection to a node. It is an L2/BGP address advertiser, not an L7 proxy, and has no notion of HTTP/2 or gRPC, so there is nothing to enable for gRPC here: stream balancing, retries and TLS are all Envoy's job. What MetalLB does decide is what happens to established connections when the cluster changes, and gRPC connections are long-lived by design.
+
+| Mode | Behaviour | Effect on gRPC |
+|---|---|---|
+| L2 (ARP/NDP) | One elected node answers for the VIP; kube-proxy spreads from there | Every stream enters through a single node, so that node's bandwidth is the ceiling. On failover MetalLB sends gratuitous ARP/NDP, and clients that cache the old MAC reconnect slowly |
+| BGP (ECMP) | Routers hash each connection across nodes | Router hashes are not stable. When the node set changes, most established connections rehash onto a node that knows nothing about them and break in one clean hit. "Resilient ECMP", where the routers offer it, reduces this sharply |
+
+Either way a node change ends established HTTP/2 connections and every client has to reconnect. That matters more here than in a typical HTTP setup: `mongod` holds a single long-lived connection to `mongot` through this gateway, so a MetalLB event is a search outage until it redials.
+
+`externalTrafficPolicy` is worth choosing deliberately, since MetalLB honours it. `Cluster`, the default, spreads traffic across nodes but SNATs it, so the client IP does not reach the Envoy access log. `Local` preserves the source IP and skips a hop, but only nodes running an Envoy pod will accept the traffic, which makes Envoy replica placement part of the routing decision.
+
+The annotation above is the current spelling. `spec.loadBalancerIP` was deprecated in Kubernetes 1.24, and the older `metallb.universe.tf/loadBalancerIPs` prefix is deprecated in favour of `metallb.io/loadBalancerIPs`.
 
 ### A.3 `02-gateway.yaml`
 
@@ -833,7 +855,58 @@ Renewal is automatic: cert-manager rewrites the Secret at `renewBefore`, and Env
 
 **Alternative wiring.** cert-manager can also read the Gateway directly: annotate it with `cert-manager.io/cluster-issuer: poc-company-net-ca` and cert-manager derives the Certificate from the listener's `hostname` and `certificateRefs`, so no separate `Certificate` resource is needed. Confirm the Gateway API integration is enabled in your cert-manager version before depending on it; the explicit `Certificate` above works regardless.
 
-### A.7 Operator-managed resources (reference only, do not apply)
+### A.7 MongoDBSearch: hand load balancing to this gateway
+
+With three `mongot` replicas the `MongoDBSearch` resource must state who load-balances traffic to them. MongoDB requires an L7 load balancer above one replica: `mongod` opens a single long-lived TCP connection to `mongot`, so an L4 balancer cannot spread queries across pods. An L7 balancer distributes individual gRPC streams, pinning each stream to one `mongot` for the duration of the query cursor.
+
+Exactly one of two modes must be set:
+
+| Mode | Who runs the proxy |
+|---|---|
+| `loadBalancer.managed: {}` | The operator deploys and manages its own Envoy proxy Deployment |
+| `loadBalancer.unmanaged` | You provide the L7 load balancer, which here is this Gateway |
+
+This architecture uses `unmanaged`, because the Envoy Gateway in this repository *is* the L7 load balancer. Choosing `managed` would stand up a second Envoy beside it.
+
+`unmanaged` is not an empty object. `endpoint` is required, in `host:port` form, and the resource is rejected without it:
+
+```yaml
+# Fragment of the existing MongoDBSearch resource: everything else in the spec
+# stays as your deployment already has it, and only loadBalancer is added.
+spec:
+  clusters:
+    - replicas: 3
+      loadBalancer:
+        unmanaged:
+          # Required. `unmanaged: {}` on its own is rejected.
+          endpoint: grpc.eg-poc2.poc.company.net:443
+```
+
+When the operator manages the MongoDB deployment (`spec.source.mongodbResourceRef`), it writes this endpoint into the `mongod` configuration as `mongotHost` and `searchIndexManagementHostAndPort`. `mongod` therefore reaches `mongot` *through this gateway*, which makes the gateway the search data path and not only an entry point for applications and tooling.
+
+What that implies:
+
+- **The endpoint must resolve, and be reachable, from the `mongod` pods.** They resolve through CoreDNS, which does not know this hostname; add the `hosts` block from the DNS step.
+- **The port must match a listener.** `:443` is the TLS listener and `:80` the h2c one. Anything past validation uses `:443`.
+- **Every entry in `spec.clusters` must agree on the mode.** The operator rejects a mix of `managed` and `unmanaged`.
+- **Multi-cluster deployments support only `managed`.** `unmanaged` is single-cluster.
+- **Retry on overload becomes ours to configure.** `mongot` signals load shedding with gRPC `RESOURCE_EXHAUSTED` (`spec.featureFlags.enableOverloadRetrySignal`, default `true`) and expects the proxy to retry on a different `mongot`. The operator-managed Envoy does this by default, with 2 retries and a 60s per-try timeout. Under `unmanaged` nothing configures that for us, so it belongs in a `BackendTrafficPolicy`.
+
+Confirm what the operator did with the value:
+
+```bash
+# Confirm the served resource name and group first
+kubectl api-resources | grep -i mongodbsearch
+
+kubectl get mongodbsearch -n dvh-mng-qa -o yaml | grep -A4 loadBalancer
+
+# The operator should have written the endpoint into the mongod configuration
+kubectl get mongodb -n dvh-mng-qa -o yaml | grep -iE 'mongotHost|searchIndexManagementHostAndPort'
+```
+
+Field reference: [MongoDBSearch Resource Specification](https://www.mongodb.com/docs/kubernetes/current/reference/k8s-operator-search-specification/) and [Deploy MongoDB Search and Vector Search](https://www.mongodb.com/docs/kubernetes/current/fts-vs-deployment/). The schema is version-sensitive, so confirm it against the documentation for your operator version.
+
+### A.8 Operator-managed resources (reference only, do not apply)
 
 The MongoDB Operator creates and reconciles the search Service and StatefulSet. Don't hand-apply or edit them; confirm they look like this instead:
 
@@ -868,8 +941,10 @@ Carried out in Phase 4 of the rollout.
 
 - **Encrypt to the backend if required.** If mongot serves TLS, add a `BackendTLSPolicy` for `dvh-mongo-qa-search-search-svc`.
 - **Remove single points of failure.** Run more than one Envoy replica (`spec.provider.kubernetes.envoyDeployment.replicas` in the EnvoyProxy) and add a PodDisruptionBudget for the mongot pods.
+- **Choose `externalTrafficPolicy` deliberately.** `Cluster`, the default, SNATs, so the Envoy access log shows a node address rather than the client. `Local` preserves the client IP and skips a hop, but only nodes running an Envoy pod accept traffic, which ties routing to replica placement.
 - **Tune traffic policy.** Review timeouts, retries and health checks with a `BackendTrafficPolicy`, especially for long-running search queries.
-- **Verify multi-replica behaviour.** Confirm with the MongoDB documentation for your operator and mongot version that spreading requests across replicas behind an L7 load balancer suits your query patterns (for example, how search cursors are continued). If requests must stick to one replica, use consistent-hash load balancing in a `BackendTrafficPolicy`.
+- **Retry mongot overload.** `mongot` sheds load with gRPC `RESOURCE_EXHAUSTED` and expects the proxy to retry on a different replica. The operator-managed Envoy does this by default, with 2 retries and a 60s per-try timeout. Under `loadBalancer.unmanaged` nothing sets that for us, so it belongs in a `BackendTrafficPolicy`; without it a shedding replica surfaces to the client as a failed query.
+- **Verify multi-replica behaviour.** MongoDB documents that an L7 balancer distributes gRPC streams while pinning each stream to one `mongot` for the duration of the query cursor, which is what Envoy does here. Confirm that holds for your operator and mongot version before relying on it.
 
 ## Appendix C: ReferenceGrant (not needed in this layout)
 

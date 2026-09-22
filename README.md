@@ -85,7 +85,7 @@ ASCII version, for terminals, wikis and anywhere Mermaid does not render:
                   | :443                                | :80
                   v                                     v
   +---------------------------------------------------------------------+
-  | MetalLB VIP 172.19.255.151  <-  DNS: grpc.eg-poc2.poc.company.net         |
+  | MetalLB VIP 172.19.255.151  <-  DNS: grpc.eg-poc2.poc.company.net   |
   | Envoy proxy Service type=LoadBalancer (EnvoyProxy: grpc-gw-proxy)   |
   | Envoy pods run in envoy-gateway-system by default                   |
   +---------------+-------------------------------------+---------------+
@@ -111,7 +111,7 @@ ASCII version, for terminals, wikis and anywhere Mermaid does not render:
   | namespace: dvh-mng-qa            v                                  |
   |            +-------------------------------------------+            |
   |            | GRPCRoute: mongo-search-grpc              |            |
-  |            | hostnames: grpc.eg-poc2.poc.company.net         |            |
+  |            | hostnames: grpc.eg-poc2.poc.company.net   |            |
   |            | listeners: h2c, https-grpc                |            |
   |            +---------------------+---------------------+            |
   |                                  | backendRefs                      |

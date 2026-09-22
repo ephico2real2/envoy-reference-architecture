@@ -266,7 +266,8 @@ flowchart LR
 |-- README.md                 Reference architecture, DNS, TLS, deploy, validate, troubleshoot
 |-- .gitignore                Keeps TLS keys and certificates out of git
 |-- docs/
-|   `-- proposal.md           Self-contained design proposal (publishable standalone)
+|   |-- proposal.md           Self-contained design proposal (publishable standalone)
+|   `-- diagrams/             PNG exports of the Mermaid diagrams, plus render.sh
 `-- manifests/
     |-- 00-namespace.yaml     Namespace: dvh-envoy-qa (Gateway side)
     |-- 01-envoyproxy.yaml    EnvoyProxy: LoadBalancer Service + MetalLB VIP

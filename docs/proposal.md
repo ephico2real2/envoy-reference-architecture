@@ -13,7 +13,8 @@
 > code block shows as source text unless a Mermaid Marketplace/Forge app is installed. Every diagram
 > below therefore appears twice: the Mermaid source, then the same diagram as plain text, which always
 > renders. If your space has a Mermaid app, delete the plain-text copies; if it does not, delete the
-> Mermaid blocks.
+> Mermaid blocks. Pre-rendered PNGs of all five are in `docs/diagrams/`, ready to
+> attach if you would rather publish images than either copy.
 
 ## 1. Summary
 

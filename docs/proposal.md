@@ -19,7 +19,7 @@
 
 We propose exposing the MongoDB Search (`mongot`) cluster in `dvh-mng-qa` through a dedicated Envoy Gateway (`grpc-gw` in `dvh-envoy-qa`), using the Kubernetes Gateway API and a `GRPCRoute`.
 
-Clients get one stable endpoint, `grpc.eg-poc2.poc.local` (MetalLB VIP `172.19.255.151`), with TLS on port 443. A temporary h2c listener on port 80 supports validation and is removed before production sign-off. The gateway routes to the shared mongot Service, so Envoy load-balances each request across all three replicas, and replicas can fail or scale without any gateway change.
+Clients get one stable endpoint, `grpc.eg-poc2.poc.company.net` (MetalLB VIP `172.19.255.151`), with TLS on port 443. A temporary h2c listener on port 80 supports validation and is removed before production sign-off. The gateway routes to the shared mongot Service, so Envoy load-balances each request across all three replicas, and replicas can fail or scale without any gateway change.
 
 ## 2. Background and problem
 
@@ -65,7 +65,7 @@ One Gateway serves two paths to the same backend:
 | GatewayClass | `eg` (Envoy Gateway) |
 | Gateway | `grpc-gw` |
 | EnvoyProxy | `grpc-gw-proxy` |
-| Hostname | `grpc.eg-poc2.poc.local` |
+| Hostname | `grpc.eg-poc2.poc.company.net` |
 | VIP (MetalLB) | `172.19.255.151` |
 | TLS secret | `dvh-envoy-qa/eg-poc2-tls` |
 | GRPCRoute | `dvh-mng-qa/mongo-search-grpc` |
@@ -78,8 +78,8 @@ One Gateway serves two paths to the same backend:
 - Envoy Gateway installed (GatewayClass `eg`).
 - MetalLB installed, with an address pool that contains `172.19.255.151`.
 - MongoDB Search deployed by the MongoDB Operator, with 3 `mongot` replicas.
-- `grpc.eg-poc2.poc.local` resolves to `172.19.255.151` (DNS or `/etc/hosts`) â see Appendix A.5.
-- An internal CA, or cert-manager on the cluster, to issue the gateway certificate â see Appendix A.6.
+- `grpc.eg-poc2.poc.company.net` resolves to `172.19.255.151` (DNS or `/etc/hosts`) — see Appendix A.5.
+- An internal CA, or cert-manager on the cluster, to issue the gateway certificate — see Appendix A.6.
 - `grpcurl` installed on the test workstation.
 
 ### 4.3 Architecture
@@ -90,7 +90,7 @@ Solid lines are the production path (TLS, port 443). Dotted lines are the test p
 flowchart TB
     app["gRPC client<br/>(application / tool)"]
     tester["grpcurl<br/>(engineer workstation)"]
-    vip(["MetalLB VIP 172.19.255.151<br/>grpc.eg-poc2.poc.local"])
+    vip(["MetalLB VIP 172.19.255.151<br/>grpc.eg-poc2.poc.company.net"])
 
     subgraph gwns["namespace: dvh-envoy-qa"]
         subgraph gw["Gateway: grpc-gw (class: eg)"]
@@ -100,7 +100,7 @@ flowchart TB
     end
 
     subgraph qa["namespace: dvh-mng-qa"]
-        route["GRPCRoute: mongo-search-grpc<br/>host: grpc.eg-poc2.poc.local"]
+        route["GRPCRoute: mongo-search-grpc<br/>host: grpc.eg-poc2.poc.company.net"]
         svc["Service: dvh-mongo-qa-search-search-svc<br/>port 27028<br/>(Envoy balances per request across pod IPs)"]
         subgraph sts["StatefulSet: dvh-mongo-qa-search-search"]
             m0["mongot-0<br/>:27028"]
@@ -130,7 +130,7 @@ flowchart TB
                   | :443                                | :80
                   v                                     v
   +---------------------------------------------------------------------+
-  | MetalLB VIP 172.19.255.151  <-  DNS: grpc.eg-poc2.poc.local         |
+  | MetalLB VIP 172.19.255.151  <-  DNS: grpc.eg-poc2.poc.company.net         |
   | Envoy proxy Service type=LoadBalancer (EnvoyProxy: grpc-gw-proxy)   |
   | Envoy pods run in envoy-gateway-system by default                   |
   +---------------+-------------------------------------+---------------+
@@ -155,7 +155,7 @@ flowchart TB
   | namespace: dvh-mng-qa            v                                  |
   |            +-------------------------------------------+            |
   |            | GRPCRoute: mongo-search-grpc              |            |
-  |            | hostnames: grpc.eg-poc2.poc.local         |            |
+  |            | hostnames: grpc.eg-poc2.poc.company.net         |            |
   |            | listeners: h2c, https-grpc                |            |
   |            +---------------------+---------------------+            |
   |                                  | backendRefs                      |
@@ -236,14 +236,14 @@ sequenceDiagram
     participant E as Envoy (VIP 172.19.255.151)
     participant M as mongot-N
 
-    C->>E: Connect to grpc.eg-poc2.poc.local
+    C->>E: Connect to grpc.eg-poc2.poc.company.net
     alt Production, port 443
-        C->>E: TLS ClientHello, SNI grpc.eg-poc2.poc.local
+        C->>E: TLS ClientHello, SNI grpc.eg-poc2.poc.company.net
         E-->>C: Certificate from secret dvh-envoy-qa/eg-poc2-tls
     else Testing, port 80
         Note over C,E: h2c, no TLS handshake
     end
-    C->>E: HTTP/2 gRPC call, authority grpc.eg-poc2.poc.local
+    C->>E: HTTP/2 gRPC call, authority grpc.eg-poc2.poc.company.net
     Note over E: Match listener, then GRPCRoute<br/>dvh-mng-qa/mongo-search-grpc by hostname
     Note over E: Pick a ready pod from the EndpointSlices<br/>of dvh-mongo-qa-search-search-svc
     E->>M: HTTP/2 to podIP:27028
@@ -252,7 +252,7 @@ sequenceDiagram
 ```
 
 ```text
-[1] Client resolves grpc.eg-poc2.poc.local -> 172.19.255.151
+[1] Client resolves grpc.eg-poc2.poc.company.net -> 172.19.255.151
      |
      v
 [2] MetalLB VIP hands the connection to an Envoy proxy pod
@@ -264,7 +264,7 @@ sequenceDiagram
      |
      v
 [4] Envoy matches GRPCRoute dvh-mng-qa/mongo-search-grpc
-       :authority must equal grpc.eg-poc2.poc.local
+       :authority must equal grpc.eg-poc2.poc.company.net
        the rule has no method matches -> all gRPC services/methods
      |
      v
@@ -363,7 +363,7 @@ flowchart LR
 
 ## 7. Security considerations
 
-- **Certificates.** Issue the gateway certificate from the internal CA and verify it from clients. A public CA cannot sign `.local`, so the trust anchor is ours to distribute. Appendix A.6 gives both paths: manual `openssl` plus `kubectl create secret tls`, or cert-manager with a CA `ClusterIssuer`. Private keys never go into git; `.gitignore` excludes `*.key`, `*.crt` and `*.pem`.
+- **Certificates.** Issue the gateway certificate from the internal CA and verify it from clients. The VIP is RFC 1918 and the QA zone is served internally, so the trust anchor is ours to distribute rather than a public CA's. Appendix A.6 gives both paths: manual `openssl` plus `kubectl create secret tls`, or cert-manager with a CA `ClusterIssuer`. Private keys never go into git; `.gitignore` excludes `*.key`, `*.crt` and `*.pem`.
 - **Cleartext test path.** The h2c listener on port 80 is unauthenticated cleartext. It exists for QA validation only and is closed before production sign-off (see §9, Phase 4).
 - **Route attachment.** `allowedRoutes.namespaces.from: All` is restricted to a namespace selector during hardening, so only `dvh-mng-qa` can attach routes.
 - **Backend encryption.** If policy requires encryption inside the cluster, add a `BackendTLSPolicy` so Envoy re-encrypts to mongot.
@@ -427,24 +427,24 @@ kubectl get pods -n dvh-mng-qa -o wide | grep search-search
 
 ```bash
 # By hostname
-grpcurl -plaintext grpc.eg-poc2.poc.local:80 list
+grpcurl -plaintext grpc.eg-poc2.poc.company.net:80 list
 
 # By IP: set :authority, otherwise it is "172.19.255.151:80",
 # which does not match the listener/route hostname and Envoy finds no route
-grpcurl -plaintext -authority grpc.eg-poc2.poc.local 172.19.255.151:80 list
+grpcurl -plaintext -authority grpc.eg-poc2.poc.company.net 172.19.255.151:80 list
 ```
 
 **Port 443 (TLS)**
 
 ```bash
 # POC with a self-signed certificate (skips verification)
-grpcurl -insecure grpc.eg-poc2.poc.local:443 list
+grpcurl -insecure grpc.eg-poc2.poc.company.net:443 list
 
 # Verify the certificate (production)
-grpcurl -cacert tls.crt grpc.eg-poc2.poc.local:443 list
+grpcurl -cacert tls.crt grpc.eg-poc2.poc.company.net:443 list
 
 # By IP: -authority also sets SNI, which the HTTPS listener needs
-grpcurl -insecure -authority grpc.eg-poc2.poc.local 172.19.255.151:443 list
+grpcurl -insecure -authority grpc.eg-poc2.poc.company.net 172.19.255.151:443 list
 ```
 
 **Confirm load balancing across mongot pods**
@@ -452,7 +452,7 @@ grpcurl -insecure -authority grpc.eg-poc2.poc.local 172.19.255.151:443 list
 ```bash
 # Send some traffic
 for i in $(seq 1 30); do
-  grpcurl -plaintext grpc.eg-poc2.poc.local:80 list >/dev/null 2>&1
+  grpcurl -plaintext grpc.eg-poc2.poc.company.net:80 list >/dev/null 2>&1
 done
 
 # Per-endpoint request counters from the Envoy admin API
@@ -472,10 +472,10 @@ curl -s localhost:19000/clusters | grep '^grpcroute/dvh-mng-qa/mongo-search-grpc
 | Gateway `PROGRAMMED=False` | Envoy Service has no address, or invalid listener config | `kubectl describe gateway grpc-gw -n dvh-envoy-qa` |
 | Route `Accepted=False` | `sectionName` does not match a listener name, or route and listener hostnames do not overlap | Listener names `h2c` / `https-grpc`, `hostnames` |
 | Route `ResolvedRefs=False` | Wrong Service name or port, or cross-namespace backend without a ReferenceGrant | `kubectl get svc -n dvh-mng-qa` |
-| Works by hostname, fails by IP | `:authority` / SNI is the IP, not the listener hostname | Add `-authority grpc.eg-poc2.poc.local` |
+| Works by hostname, fails by IP | `:authority` / SNI is the IP, not the listener hostname | Add `-authority grpc.eg-poc2.poc.company.net` |
 | TLS handshake fails on 443 | Secret missing or in the wrong namespace, SAN does not include the hostname, SNI mismatch | Secret in `dvh-envoy-qa`, certificate SAN |
-| Hostname does not resolve | No A record in the internal resolver, or `.local` queried against public DNS | `dig +short grpc.eg-poc2.poc.local` must return the VIP |
-| cert-manager `Certificate` stays `READY=False` | Issuer missing or not ready, or the CA Secret is not in the namespace cert-manager reads ClusterIssuer secrets from | `kubectl describe certificate eg-poc2-tls -n dvh-envoy-qa`, then `kubectl describe clusterissuer poc-local-ca` |
+| Hostname does not resolve | No A record in the resolver the client actually uses, or the client is answered by the public view of `poc.company.net` rather than the internal one | `dig +short grpc.eg-poc2.poc.company.net` must return the VIP |
+| cert-manager `Certificate` stays `READY=False` | Issuer missing or not ready, or the CA Secret is not in the namespace cert-manager reads ClusterIssuer secrets from | `kubectl describe certificate eg-poc2-tls -n dvh-envoy-qa`, then `kubectl describe clusterissuer poc-company-net-ca` |
 | `server does not support the reflection API` | mongot does not expose reflection, **or** Envoy found no route (a no-route reply carries the same gRPC status) | Envoy access log: an upstream host of `<podIP>:27028` means the path works; response flag `NR` means no route matched |
 | `Unavailable` / `no healthy upstream` | No ready endpoints, or wrong port | EndpointSlices, pod readiness |
 | Upstream connection resets or protocol errors | mongot expects TLS on 27028 | Add a `BackendTLSPolicy` so Envoy re-encrypts to the pods |
@@ -510,7 +510,7 @@ flowchart LR
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| 0. Prerequisites | A record for `grpc.eg-poc2.poc.local` in the internal resolver; VIP `172.19.255.151` in a MetalLB pool; `dvh-envoy-qa` namespace; certificate issued into `dvh-envoy-qa/eg-poc2-tls` (Appendix A.5, A.6) | `dig +short` returns the VIP, VIP free, Secret present with the hostname in its SAN |
+| 0. Prerequisites | A record for `grpc.eg-poc2.poc.company.net` in the internal resolver; VIP `172.19.255.151` in a MetalLB pool; `dvh-envoy-qa` namespace; certificate issued into `dvh-envoy-qa/eg-poc2-tls` (Appendix A.5, A.6) | `dig +short` returns the VIP, VIP free, Secret present with the hostname in its SAN |
 | 1. Deploy and validate (h2c) | Apply `manifests/`; test on port 80 | Gateway programmed, route accepted on both listeners, 3 ready endpoints, `grpcurl` succeeds on :80 |
 | 2. TLS path | Test on port 443 with certificate verification | `grpcurl -cacert` succeeds on :443 |
 | 3. Pilot | Point one or two agreed clients at the endpoint for an agreed soak period | No client-visible errors; requests spread across all 3 pods |
@@ -630,7 +630,7 @@ spec:
     - name: h2c
       protocol: HTTP
       port: 80
-      hostname: grpc.eg-poc2.poc.local
+      hostname: grpc.eg-poc2.poc.company.net
       allowedRoutes:
         namespaces:
           from: All
@@ -638,7 +638,7 @@ spec:
     - name: https-grpc
       protocol: HTTPS
       port: 443
-      hostname: grpc.eg-poc2.poc.local
+      hostname: grpc.eg-poc2.poc.company.net
       tls:
         mode: Terminate
         certificateRefs:
@@ -655,7 +655,7 @@ Attaches to both listeners with `sectionName`. The rule has no `matches`, so eve
 
 ```yaml
 # GRPCRoute: attaches to both Gateway listeners and forwards every gRPC
-# service/method for grpc.eg-poc2.poc.local to the shared mongot Service.
+# service/method for grpc.eg-poc2.poc.company.net to the shared mongot Service.
 # Route and Service are in the same namespace, so no ReferenceGrant is needed.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
@@ -673,7 +673,7 @@ spec:
       sectionName: https-grpc
 
   hostnames:
-    - grpc.eg-poc2.poc.local
+    - grpc.eg-poc2.poc.company.net
 
   rules:
     - backendRefs:
@@ -700,23 +700,23 @@ Create an A record pointing the hostname at that address:
 
 | Record | Type | Value | TTL |
 |---|---|---|---|
-| `grpc.eg-poc2.poc.local` | A | `172.19.255.151` | 300 |
+| `grpc.eg-poc2.poc.company.net` | A | `172.19.255.151` | 300 |
 
-`.local` is reserved for multicast DNS (RFC 6762), so this name will never resolve through public DNS. The record has to be created in whichever internal resolver serves `poc.local`.
+`172.19.255.151` is RFC 1918 address space, so this record belongs in the internal (split-horizon) view that serves `poc.company.net`. Publishing a private address in a public zone leaks internal addressing and helps nobody outside the network, who still cannot route to it.
 
-If you expect more gateway hostnames under the same zone later, a wildcard A record `*.eg-poc2.poc.local` pointing at the same VIP saves a DNS change per hostname. Pair it with the wildcard certificate below.
+If you expect more gateway hostnames under the same zone later, a wildcard A record `*.eg-poc2.poc.company.net` pointing at the same VIP saves a DNS change per hostname. Pair it with the wildcard certificate below.
 
 **Workstation only, no DNS change** — enough to run the tests in this document:
 
 ```bash
-echo "172.19.255.151  grpc.eg-poc2.poc.local" | sudo tee -a /etc/hosts
+echo "172.19.255.151  grpc.eg-poc2.poc.company.net" | sudo tee -a /etc/hosts
 ```
 
 **In-cluster clients** resolve through CoreDNS, which does not know this name. If pods must reach the gateway by hostname, add a `hosts` block to the CoreDNS ConfigMap (`kubectl -n kube-system edit configmap coredns`):
 
 ```text
 hosts {
-    172.19.255.151 grpc.eg-poc2.poc.local
+    172.19.255.151 grpc.eg-poc2.poc.company.net
     fallthrough
 }
 ```
@@ -724,8 +724,8 @@ hosts {
 Verify before touching TLS — both commands must return the VIP:
 
 ```bash
-dig +short grpc.eg-poc2.poc.local
-getent hosts grpc.eg-poc2.poc.local
+dig +short grpc.eg-poc2.poc.company.net
+getent hosts grpc.eg-poc2.poc.company.net
 ```
 
 This matters more than it looks: the hostname is matched three times over — by the listener, by the GRPCRoute `hostnames`, and by the certificate SAN. If DNS is wrong, failures surface as "no route" or a TLS handshake error rather than as a name-resolution error.
@@ -746,9 +746,9 @@ tls:
 
 Three constraints apply to either path below:
 
-- **The SAN must contain the hostname.** Modern TLS clients, including gRPC ones, ignore `CN`. A certificate with `CN=grpc.eg-poc2.poc.local` and no `subjectAltName` fails verification.
-- **A public CA cannot issue for `.local`.** Let's Encrypt and every other public ACME CA sign only publicly resolvable names. This hostname needs an internal CA or a self-signed certificate.
-- **A wildcard matches exactly one label.** `*.eg-poc2.poc.local` covers `grpc.eg-poc2.poc.local`, but not `a.b.eg-poc2.poc.local` and not the bare `eg-poc2.poc.local`. List the apex explicitly if you need it.
+- **The SAN must contain the hostname.** Modern TLS clients, including gRPC ones, ignore `CN`. A certificate with `CN=grpc.eg-poc2.poc.company.net` and no `subjectAltName` fails verification.
+- **A public CA can issue only if the zone is publicly delegated.** `poc.company.net` is a real, delegable name, so unlike a reserved suffix this is possible in principle. In practice the VIP is RFC 1918 and unreachable from the internet, which rules out HTTP-01 and leaves DNS-01 against the public zone. Where `poc.company.net` is served only by internal DNS, an internal CA is the workable path, and that is what Option B assumes.
+- **A wildcard matches exactly one label.** `*.eg-poc2.poc.company.net` covers `grpc.eg-poc2.poc.company.net`, but not `a.b.eg-poc2.poc.company.net` and not the bare `eg-poc2.poc.company.net`. List the apex explicitly if you need it.
 
 #### Option A: without cert-manager
 
@@ -757,8 +757,8 @@ Three constraints apply to either path below:
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout tls.key -out tls.crt \
-  -subj "/CN=grpc.eg-poc2.poc.local" \
-  -addext "subjectAltName=DNS:grpc.eg-poc2.poc.local"
+  -subj "/CN=grpc.eg-poc2.poc.company.net" \
+  -addext "subjectAltName=DNS:grpc.eg-poc2.poc.company.net"
 ```
 
 **Wildcard (self-signed), covering every host in the zone:**
@@ -766,8 +766,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout tls.key -out tls.crt \
-  -subj "/CN=*.eg-poc2.poc.local" \
-  -addext "subjectAltName=DNS:*.eg-poc2.poc.local,DNS:eg-poc2.poc.local"
+  -subj "/CN=*.eg-poc2.poc.company.net" \
+  -addext "subjectAltName=DNS:*.eg-poc2.poc.company.net,DNS:eg-poc2.poc.company.net"
 ```
 
 **Signed by your internal CA** — generate a CSR, have the CA sign it, then assemble the chain:
@@ -775,8 +775,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 ```bash
 openssl req -new -newkey rsa:2048 -nodes \
   -keyout tls.key -out tls.csr \
-  -subj "/CN=grpc.eg-poc2.poc.local" \
-  -addext "subjectAltName=DNS:grpc.eg-poc2.poc.local"
+  -subj "/CN=grpc.eg-poc2.poc.company.net" \
+  -addext "subjectAltName=DNS:grpc.eg-poc2.poc.company.net"
 
 # Submit tls.csr to the CA. Save the signed leaf, then any intermediates,
 # into tls.crt in that order. Do not append the root.
@@ -814,7 +814,7 @@ kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 && echo present || 
 kubectl get pods -n cert-manager
 ```
 
-Since `.local` rules out a public ACME issuer, sign from an internal root. Bootstrap one if you do not already have a CA to import:
+This example signs from an internal root, the right default for a QA hostname that resolves only inside the network. If `poc.company.net` is publicly delegated and you would rather use ACME, swap this `ClusterIssuer` for an ACME one with a DNS-01 solver and leave the `Certificate` below unchanged. Bootstrap the internal root if you do not already have a CA to import:
 
 ```yaml
 # A self-signed issuer whose only job is to mint the root below.
@@ -831,12 +831,12 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: poc-local-ca
+  name: poc-company-net-ca
   namespace: cert-manager
 spec:
   isCA: true
-  commonName: poc.local internal CA
-  secretName: poc-local-ca
+  commonName: poc.company.net internal CA
+  secretName: poc-company-net-ca
   duration: 43800h          # 5 years
   privateKey:
     algorithm: ECDSA
@@ -850,10 +850,10 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: poc-local-ca
+  name: poc-company-net-ca
 spec:
   ca:
-    secretName: poc-local-ca
+    secretName: poc-company-net-ca
 ```
 
 **Leaf certificate, single host.** `secretName` must equal the `certificateRefs` name on the listener:
@@ -868,9 +868,9 @@ spec:
   secretName: eg-poc2-tls   # consumed by listener https-grpc
   duration: 2160h           # 90 days
   renewBefore: 360h         # renew 15 days out
-  commonName: grpc.eg-poc2.poc.local
+  commonName: grpc.eg-poc2.poc.company.net
   dnsNames:
-    - grpc.eg-poc2.poc.local
+    - grpc.eg-poc2.poc.company.net
   usages:
     - server auth
   privateKey:
@@ -878,7 +878,7 @@ spec:
     size: 256
     rotationPolicy: Always
   issuerRef:
-    name: poc-local-ca
+    name: poc-company-net-ca
     kind: ClusterIssuer
     group: cert-manager.io
 ```
@@ -886,10 +886,10 @@ spec:
 **Wildcard variant** — same resource, different names:
 
 ```yaml
-  commonName: "*.eg-poc2.poc.local"
+  commonName: "*.eg-poc2.poc.company.net"
   dnsNames:
-    - "*.eg-poc2.poc.local"
-    - eg-poc2.poc.local
+    - "*.eg-poc2.poc.company.net"
+    - eg-poc2.poc.company.net
 ```
 
 A wildcard from a public ACME issuer would additionally need a DNS-01 solver, because HTTP-01 cannot validate wildcards. That does not apply to a CA issuer, which signs whatever names you ask for.
@@ -905,14 +905,14 @@ kubectl describe certificate eg-poc2-tls -n dvh-envoy-qa
 **Client trust** — export the root and verify against it instead of using `-insecure`:
 
 ```bash
-kubectl get secret poc-local-ca -n cert-manager -o jsonpath='{.data.tls\.crt}' \
-  | base64 -d > poc-local-ca.crt
-grpcurl -cacert poc-local-ca.crt grpc.eg-poc2.poc.local:443 list
+kubectl get secret poc-company-net-ca -n cert-manager -o jsonpath='{.data.tls\.crt}' \
+  | base64 -d > poc-company-net-ca.crt
+grpcurl -cacert poc-company-net-ca.crt grpc.eg-poc2.poc.company.net:443 list
 ```
 
 Renewal is automatic: cert-manager rewrites the Secret at `renewBefore`, and Envoy Gateway reloads it without a restart. This is the main operational argument for Option B — Option A's certificate expires silently unless someone diaries it.
 
-**Alternative wiring.** cert-manager can also read the Gateway directly: annotate it with `cert-manager.io/cluster-issuer: poc-local-ca` and cert-manager derives the Certificate from the listener's `hostname` and `certificateRefs`, so no separate `Certificate` resource is needed. Confirm the Gateway API integration is enabled in your cert-manager version before depending on it; the explicit `Certificate` above works regardless.
+**Alternative wiring.** cert-manager can also read the Gateway directly: annotate it with `cert-manager.io/cluster-issuer: poc-company-net-ca` and cert-manager derives the Certificate from the listener's `hostname` and `certificateRefs`, so no separate `Certificate` resource is needed. Confirm the Gateway API integration is enabled in your cert-manager version before depending on it; the explicit `Certificate` above works regardless.
 
 ### A.7 Operator-managed resources (reference only, do not apply)
 

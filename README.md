@@ -7,7 +7,7 @@ Expose a MongoDB Search (`mongot`) StatefulSet through Envoy Gateway, using the 
 | Production | 443 | TLS + HTTP/2 (gRPC) | Applications and tools |
 | Testing | 80 | h2c (HTTP/2 cleartext) | Validating connectivity, routing and endpoint discovery before TLS is involved |
 
-This README is the reference implementation. The design proposal (goals, decisions, alternatives, security, rollout plan, risks and sign-off) is in [docs/proposal.md](docs/proposal.md).
+This README is the reference implementation. The design proposal (goals, decisions, alternatives, security, rollout plan, risks and sign-off) is in [docs/proposal.md](docs/proposal.md) — it repeats the architecture, manifests and runbook inline so it can be published as a single standalone page (for example to Confluence).
 
 ## Environment
 
@@ -265,7 +265,7 @@ flowchart LR
 |-- README.md                 Reference architecture, deploy, validate, troubleshoot
 |-- .gitignore                Keeps TLS keys and certificates out of git
 |-- docs/
-|   `-- proposal.md           Design proposal for review and sign-off
+|   `-- proposal.md           Self-contained design proposal (publishable standalone)
 `-- manifests/
     |-- 00-namespace.yaml     Namespace: dvh-envoy-qa (Gateway side)
     |-- 01-envoyproxy.yaml    EnvoyProxy: LoadBalancer Service + MetalLB VIP

@@ -7,7 +7,7 @@ Expose a MongoDB Search (`mongot`) StatefulSet through Envoy Gateway, using the 
 | Production | 443 | TLS + HTTP/2 (gRPC) | Applications and tools |
 | Testing | 80 | h2c (HTTP/2 cleartext) | Validating connectivity, routing and endpoint discovery before TLS is involved |
 
-This README is the reference implementation. The design proposal (goals, decisions, alternatives, security, rollout plan, risks and sign-off) is in [docs/proposal.md](docs/proposal.md) — it repeats the architecture, manifests and runbook inline so it can be published as a single standalone page (for example to Confluence).
+This README is the reference implementation. The design proposal (goals, decisions, alternatives, security, rollout plan, risks and sign-off) is in [docs/proposal.md](docs/proposal.md) — it repeats the architecture, manifests and runbook inline so it stands alone. To publish it to Confluence use [docs/confluence.md](docs/confluence.md), the same document with a placeholder marking each diagram image.
 
 ## Environment
 
@@ -266,7 +266,9 @@ flowchart LR
 |-- README.md                 Reference architecture, DNS, TLS, deploy, validate, troubleshoot
 |-- .gitignore                Keeps TLS keys and certificates out of git
 |-- docs/
-|   |-- proposal.md           Self-contained design proposal (publishable standalone)
+|   |-- proposal.md           Self-contained design proposal (the source of truth)
+|   |-- confluence.md         Generated: proposal.md with image placeholders, for Confluence
+|   |-- build-confluence.sh   Regenerates confluence.md from proposal.md
 |   `-- diagrams/             PNG exports of the Mermaid diagrams, plus render.sh
 `-- manifests/
     |-- 00-namespace.yaml     Namespace: dvh-envoy-qa (Gateway side)

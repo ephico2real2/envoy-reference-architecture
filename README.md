@@ -187,6 +187,7 @@ Arrows point from the object that holds a reference to the object it references.
 |   |-- proposal.md           Self-contained design proposal (the source of truth)
 |   |-- confluence.md         Generated: proposal.md with image placeholders, for Confluence
 |   |-- build-confluence.sh   Regenerates confluence.md from proposal.md
+|   |-- resume-summary.md     Resume-ready description of this work
 |   `-- diagrams/             Mermaid sources (.mmd), rendered PNGs, and render.sh
 `-- manifests/
     |-- 00-namespace.yaml     Namespace: dvh-envoy-qa (Gateway side)
